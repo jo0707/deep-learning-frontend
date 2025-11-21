@@ -220,8 +220,8 @@ export default function Home() {
                     onDragLeave={onDragLeave}
                     onClick={() => document.getElementById("file-upload")?.click()}
                   >
-                    <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
-                    <p className="mt-2 text-sm text-muted-foreground">
+                    <Upload className="mx-auto h-12 w-12 text-primary" />
+                    <p className="mt-2 text-sm text-primary">
                       Drag & drop an image or click to upload
                     </p>
                     <input
