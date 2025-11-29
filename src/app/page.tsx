@@ -9,12 +9,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { ServerUrlConfig } from "@/components/server-url-config";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:5001/predict";
 
+type Prediction = {
+  class: string;
+  confidence: number;
+  confidence_percent: string;
+  rank: number;
+};
+
 export default function Home() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [serverUrl, setServerUrl] = useState<string>("");
   const { toast } = useToast();
@@ -28,7 +36,7 @@ export default function Home() {
   }, []);
 
   const startWebcam = useCallback(async () => {
-    setResult(null);
+    setPredictions([]);
     setImageSrc(null);
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -73,7 +81,7 @@ export default function Home() {
 
   const classifyImage = useCallback(async (base64Image: string) => {
     setIsLoading(true);
-    setResult(null);
+    setPredictions([]);
     if (!serverUrl) {
       toast({
         variant: "destructive",
@@ -89,6 +97,7 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify({ image: base64Image.split(",")[1] }),
       });
@@ -102,7 +111,15 @@ export default function Home() {
         throw new Error(data.error);
       }
       
-      setResult(data.prediction || "No prediction found.");
+      if (data.predictions && data.predictions.length > 0) {
+        setPredictions(data.predictions);
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Classification Failed",
+          description: "No predictions found in the response.",
+        });
+      }
 
     } catch (error) {
       console.error("Classification error:", error);
@@ -112,7 +129,6 @@ export default function Home() {
         title: "Classification Failed",
         description: errorMessage,
       });
-      setResult("Failed to classify image.");
     } finally {
       setIsLoading(false);
     }
@@ -177,7 +193,7 @@ export default function Home() {
 
   const clearImage = () => {
     setImageSrc(null);
-    setResult(null);
+    setPredictions([]);
   };
   
   return (
@@ -196,109 +212,131 @@ export default function Home() {
 
       <main className="flex-grow p-4 sm:p-6 md:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
-          <Card className="bg-card/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                Input Image
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="upload" className="w-full" onValueChange={handleTabChange}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="upload">
-                    <Upload className="mr-2 h-4 w-4" /> Upload
-                  </TabsTrigger>
-                  <TabsTrigger value="webcam">
-                    <Camera className="mr-2 h-4 w-4" /> Webcam
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value="upload">
-                  <div
-                    className="mt-4 border-2 border-dashed border-border rounded-lg p-10 text-center cursor-pointer transition-colors"
-                    onDrop={onDrop}
-                    onDragOver={onDragOver}
-                    onDragLeave={onDragLeave}
-                    onClick={() => document.getElementById("file-upload")?.click()}
-                  >
-                    <Upload className="mx-auto h-12 w-12 text-primary" />
-                    <p className="mt-2 text-sm text-primary">
-                      Drag & drop an image or click to upload
-                    </p>
-                    <input
-                      type="file"
-                      id="file-upload"
-                      className="hidden"
-                      accept="image/*"
-                      onChange={(e) => handleFileChange(e.target.files)}
-                    />
-                  </div>
-                </TabsContent>
-                <TabsContent value="webcam">
-                  <div className="mt-4 relative bg-black rounded-lg aspect-video flex items-center justify-center">
-                    <video
-                      ref={videoRef}
-                      className="w-full h-auto rounded-lg"
-                      muted
-                      playsInline
-                    />
-                    <canvas ref={canvasRef} className="hidden" />
-                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-                      <Button onClick={captureImage} size="lg" className="rounded-full h-16 w-16" disabled={isLoading}>
-                        <Camera className="h-8 w-8" />
-                        <span className="sr-only">Capture</span>
-                      </Button>
+          <div className="flex flex-col gap-8">
+            <Card className="bg-card/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  Input Image
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Tabs defaultValue="upload" className="w-full" onValueChange={handleTabChange}>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="upload">
+                      <Upload className="mr-2 h-4 w-4" /> Upload
+                    </TabsTrigger>
+                    <TabsTrigger value="webcam">
+                      <Camera className="mr-2 h-4 w-4" /> Webcam
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="upload">
+                    <div
+                      className="mt-4 border-2 border-dashed border-border rounded-lg p-10 text-center cursor-pointer transition-colors"
+                      onDrop={onDrop}
+                      onDragOver={onDragOver}
+                      onDragLeave={onDragLeave}
+                      onClick={() => document.getElementById("file-upload")?.click()}
+                    >
+                      <Upload className="mx-auto h-12 w-12 text-primary" />
+                      <p className="mt-2 text-sm text-primary">
+                        Drag & drop an image or click to upload
+                      </p>
+                      <input
+                        type="file"
+                        id="file-upload"
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(e) => handleFileChange(e.target.files)}
+                      />
                     </div>
+                  </TabsContent>
+                  <TabsContent value="webcam">
+                    <div className="mt-4 relative bg-black rounded-lg aspect-video flex items-center justify-center">
+                      <video
+                        ref={videoRef}
+                        className="w-full h-auto rounded-lg"
+                        muted
+                        playsInline
+                      />
+                      <canvas ref={canvasRef} className="hidden" />
+                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                        <Button onClick={captureImage} size="lg" className="rounded-full h-16 w-16" disabled={isLoading}>
+                          <Camera className="h-8 w-8" />
+                          <span className="sr-only">Capture</span>
+                        </Button>
+                      </div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+
+            {imageSrc && (
+              <Card className="bg-card/50">
+                <CardContent className="pt-6">
+                  <div className="relative w-full max-w-md mx-auto aspect-square">
+                    <Image
+                      src={imageSrc}
+                      alt="Input for classification"
+                      fill
+                      className="object-contain rounded-lg"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full"
+                      onClick={clearImage}
+                    >
+                      <X className="h-4 w-4" />
+                      <span className="sr-only">Clear image</span>
+                    </Button>
                   </div>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            )}
+            
+          </div>
 
           <Card className="bg-card/50">
             <CardHeader>
               <CardTitle>Classification Result</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col items-center justify-center h-full min-h-[400px]">
-              {imageSrc ? (
-                <div className="relative w-full max-w-md aspect-square">
-                  <Image
-                    src={imageSrc}
-                    alt="Input for classification"
-                    fill
-                    className="object-contain rounded-lg"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute top-2 right-2 bg-background/50 hover:bg-background/80 rounded-full"
-                    onClick={clearImage}
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Clear image</span>
-                  </Button>
+            <CardContent className="flex flex-col items-center justify-start h-full min-h-[400px]">
+              {isLoading ? (
+                  <div className="w-full space-y-2 animate-pulse pt-8">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                  </div>
+              ) : predictions.length > 0 ? (
+                <div className="w-full animate-in fade-in duration-500">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[50px]">Rank</TableHead>
+                        <TableHead>Class</TableHead>
+                        <TableHead className="text-right">Confidence</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {predictions.map((pred) => (
+                        <TableRow key={pred.rank} className={pred.rank === 1 ? "bg-primary/20" : ""}>
+                          <TableCell className="font-medium">{pred.rank}</TableCell>
+                          <TableCell>{pred.class}</TableCell>
+                          <TableCell className="text-right">{pred.confidence_percent}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
-                <div className="text-center text-muted-foreground">
+                <div className="text-center text-muted-foreground flex-grow flex flex-col items-center justify-center">
                   <ScanFace className="mx-auto h-16 w-16" />
-                  <p className="mt-4">Your image will appear here</p>
+                  <p className="mt-4">Your results will appear here</p>
                 </div>
               )}
-              
-              <div className="mt-6 text-center w-full h-16">
-                {isLoading ? (
-                  <div className="space-y-2 animate-pulse">
-                    <Skeleton className="h-4 w-32 mx-auto" />
-                    <Skeleton className="h-8 w-48 mx-auto" />
-                  </div>
-                ) : result ? (
-                  <div className="animate-in fade-in duration-500">
-                    <p className="text-sm text-muted-foreground">Predicted class:</p>
-                    <p className="text-3xl font-bold text-primary">{result}</p>
-                  </div>
-                ) : imageSrc && !isLoading ? (
-                  <p className="text-muted-foreground">Awaiting classification...</p>
-                ) : null }
-              </div>
             </CardContent>
           </Card>
         </div>
