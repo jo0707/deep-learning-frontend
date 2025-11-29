@@ -79,7 +79,7 @@ export default function Home() {
     }
   };
 
-  const classifyImage = useCallback(async (base64Image: string) => {
+  const classifyImage = useCallback(async (file: File | Blob) => {
     setIsLoading(true);
     setPredictions([]);
     if (!serverUrl) {
@@ -92,14 +92,16 @@ export default function Home() {
       return;
     }
 
+    const formData = new FormData();
+    formData.append("file", file);
+
     try {
       const response = await fetch(serverUrl, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           "ngrok-skip-browser-warning": "true",
         },
-        body: JSON.stringify({ image: base64Image.split(",")[1] }),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -145,7 +147,13 @@ export default function Home() {
         context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
         const dataUrl = canvas.toDataURL("image/jpeg");
         setImageSrc(dataUrl);
-        classifyImage(dataUrl);
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            classifyImage(blob);
+          }
+        }, "image/jpeg");
+
         stopWebcam();
       }
     }
@@ -166,9 +174,9 @@ export default function Home() {
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
         setImageSrc(dataUrl);
-        classifyImage(dataUrl);
       };
       reader.readAsDataURL(file);
+      classifyImage(file);
     }
   };
 
