@@ -11,7 +11,7 @@ import { ServerUrlConfig } from "@/components/server-url-config";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-const DEFAULT_SERVER_URL = "http://127.0.0.1:5001/predict";
+const DEFAULT_SERVER_URL = "https://afenmarbun-backend-deep-learning.hf.space/predict";
 
 type Prediction = {
   class: string;
@@ -29,59 +29,24 @@ export default function Home() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isRealtimeActive = useRef(false);
 
   useEffect(() => {
     const storedUrl = localStorage.getItem("inference_server_url");
     setServerUrl(storedUrl || DEFAULT_SERVER_URL);
   }, []);
 
-  const startWebcam = useCallback(async () => {
-    setPredictions([]);
-    setImageSrc(null);
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-        }
-      }
-    } catch (error) {
-      console.error("Error accessing webcam:", error);
-      toast({
-        variant: "destructive",
-        title: "Webcam Error",
-        description: "Could not access webcam. Please check permissions.",
-      });
-    }
-  }, [toast]);
-
   const stopWebcam = () => {
+    isRealtimeActive.current = false;
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach((track) => track.stop());
       videoRef.current.srcObject = null;
     }
   };
-  
-  useEffect(() => {
-    return () => {
-      stopWebcam();
-    };
-  }, []);
-
-
-  const handleTabChange = (value: string) => {
-    if (value === "webcam") {
-      startWebcam();
-    } else {
-      stopWebcam();
-    }
-  };
 
   const classifyImage = useCallback(async (file: File | Blob) => {
     setIsLoading(true);
-    setPredictions([]);
     if (!serverUrl) {
       toast({
         variant: "destructive",
@@ -116,11 +81,7 @@ export default function Home() {
       if (data.predictions && data.predictions.length > 0) {
         setPredictions(data.predictions);
       } else {
-        toast({
-          variant: "destructive",
-          title: "Classification Failed",
-          description: "No predictions found in the response.",
-        });
+        setPredictions([]);
       }
 
     } catch (error) {
@@ -131,36 +92,85 @@ export default function Home() {
         title: "Classification Failed",
         description: errorMessage,
       });
+      setPredictions([]); // Clear predictions on error
     } finally {
       setIsLoading(false);
     }
   }, [serverUrl, toast]);
 
-  const captureImage = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas.getContext("2d");
-      if (context) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-        const dataUrl = canvas.toDataURL("image/jpeg");
-        setImageSrc(dataUrl);
-        
-        canvas.toBlob((blob) => {
-          if (blob) {
-            classifyImage(blob);
-          }
-        }, "image/jpeg");
+  const realtimeLoop = useCallback(async () => {
+    while (isRealtimeActive.current) {
+      if (videoRef.current && canvasRef.current && videoRef.current.readyState === 4) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const context = canvas.getContext("2d");
 
-        stopWebcam();
+        if (context) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+          
+          const dataUrl = canvas.toDataURL("image/jpeg");
+          setImageSrc(dataUrl);
+
+          await new Promise<void>((resolve) => {
+            canvas.toBlob(async (blob) => {
+              if (blob && isRealtimeActive.current) {
+                await classifyImage(blob);
+              }
+              resolve();
+            }, "image/jpeg");
+          });
+        }
       }
+      // Give browser a moment to breathe
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }, [classifyImage]);
+
+  const startWebcam = useCallback(async () => {
+    stopWebcam(); // Ensure any previous stream is stopped
+    setPredictions([]);
+    setImageSrc(null);
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+          isRealtimeActive.current = true;
+          realtimeLoop();
+        }
+      }
+    } catch (error) {
+      console.error("Error accessing webcam:", error);
+      toast({
+        variant: "destructive",
+        title: "Webcam Error",
+        description: "Could not access webcam. Please check permissions.",
+      });
+      isRealtimeActive.current = false;
+    }
+  }, [toast, realtimeLoop]);
+
+  
+  useEffect(() => {
+    return () => {
+      stopWebcam();
+    };
+  }, []);
+
+  const handleTabChange = (value: string) => {
+    if (value === "webcam") {
+      startWebcam();
+    } else {
+      stopWebcam();
     }
   };
 
   const handleFileChange = (files: FileList | null) => {
     if (files && files[0]) {
+      stopWebcam();
       const file = files[0];
       if (!file.type.startsWith("image/")) {
         toast({
@@ -202,6 +212,9 @@ export default function Home() {
   const clearImage = () => {
     setImageSrc(null);
     setPredictions([]);
+    if (isRealtimeActive.current) {
+      stopWebcam();
+    }
   };
   
   return (
@@ -230,10 +243,10 @@ export default function Home() {
               <CardContent>
                 <Tabs defaultValue="upload" className="w-full" onValueChange={handleTabChange}>
                   <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="upload">
+                    <TabsTrigger value="upload" data-state-active-class="bg-primary text-primary-foreground">
                       <Upload className="mr-2 h-4 w-4" /> Upload
                     </TabsTrigger>
-                    <TabsTrigger value="webcam">
+                    <TabsTrigger value="webcam" data-state-active-class="bg-primary text-primary-foreground">
                       <Camera className="mr-2 h-4 w-4" /> Webcam
                     </TabsTrigger>
                   </TabsList>
@@ -267,12 +280,6 @@ export default function Home() {
                         playsInline
                       />
                       <canvas ref={canvasRef} className="hidden" />
-                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-                        <Button onClick={captureImage} size="lg" className="rounded-full h-16 w-16" disabled={isLoading}>
-                          <Camera className="h-8 w-8" />
-                          <span className="sr-only">Capture</span>
-                        </Button>
-                      </div>
                     </div>
                   </TabsContent>
                 </Tabs>
@@ -310,7 +317,7 @@ export default function Home() {
               <CardTitle>Classification Result</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center justify-start h-full min-h-[400px]">
-              {isLoading ? (
+              {isLoading && predictions.length === 0 ? (
                   <div className="w-full space-y-2 animate-pulse pt-8">
                     <Skeleton className="h-8 w-full" />
                     <Skeleton className="h-8 w-full" />
